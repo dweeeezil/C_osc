@@ -6,6 +6,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+
+
 int pad4(int n) //rounds up to next multiple of 4
 {
     return (n + 3) & ~0x03;
@@ -40,7 +42,6 @@ int write_float32(char *buf, int offset, float val)
     return offset + 4;
 }
 
-
 int create_socket()
 {
     int sock = socket(AF_INET, SOCK_DGRAM, 0); //SOCK_STREAM for TCP, SOCK_DGRAM for UDP
@@ -70,58 +71,114 @@ void connect_socket(int sock, const char *ip, int port)
 
 
 
-void send_osc(int sock,
-                const char *address,
-                const char *types, ...)
+
+typedef struct
 {
-    char buffer[1024] = {0};
-    int offset = 0;
+    char *buffer;
+    int capacity;
+    int offset;
+} OscBundle;
 
-    // 1. Address
-    offset = write_padded_string(buffer, offset, address);
+void osc_bundle_init(OscBundle *b, char *buffer, int capacity);
+int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...);
+int osc_bundle_send(OscBundle *b, int sock);
 
-    // 2. Type tag string (must start with ',')
-    char type_tag[64] = ",";
-    strcat(type_tag, types);
-    offset = write_padded_string(buffer, offset, type_tag);
+void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
+{
+    b->buffer = buffer;
+    b->capacity = capacity;
+    b->offset = 0;
 
-    // 3. Arguments
+    // "#bundle" + padding (8 bytes total)
+    memcpy(b->buffer + b->offset, "#bundle", 7);
+    b->offset += 8;
+
+    //timetag (8bytes) immediate
+    memset(b->buffer + b->offset, 0, 8);
+    b->offset += 8;
+}
+
+int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...)
+{
+    char msg[512] = {0};
+    int msg_offset = 0;
+
+    // build osc message
+    msg_offset = write_padded_string(msg, msg_offset, address);
+
+    char type_tag[64];
+    snprintf(type_tag, sizeof(type_tag), ",%s", types);
+    msg_offset = write_padded_string(msg, msg_offset, type_tag);
+
     va_list args;
     va_start(args, types);
 
     for (int i = 0; types[i] != '\0'; i++)
+    {
+        switch (types[i])
         {
-        switch (types[i]) {
-            case 'i': {
+            case 'i':
+            {
                 int val = va_arg(args, int);
-                offset = write_int32(buffer, offset, val);
+                msg_offset = write_int32(msg, msg_offset, val);
                 break;
             }
-            case 'f': {
-                double val = va_arg(args, double); // float promoted to double
-                offset = write_float32(buffer, offset, (float)val);
+                case 'f':
+            {
+                double val = va_arg(args, double);
+                msg_offset = write_float32(msg, msg_offset, (float)val);
                 break;
             }
-            case 's': {
+                case 's':
+            {
                 char *str = va_arg(args, char *);
-                offset = write_padded_string(buffer, offset, str);
+                msg_offset = write_padded_string(msg, msg_offset, str);
                 break;
             }
             default:
                 fprintf(stderr, "Unsupported OSC type: %c\n", types[i]);
-                break;
+                va_end(args);
+                return -1;
         }
     }
 
     va_end(args);
 
-    int bytes = send(sock, buffer, offset, 0);
-    if (bytes < 0)
-    {
-        perror("send failed");
+    // --- bounds check ---
+    if (b->offset + 4 + msg_offset > b->capacity) {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
     }
 
+    // --- write size prefix ---
+    int32_t be_size = htonl(msg_offset);
+    memcpy(b->buffer + b->offset, &be_size, 4);
+    b->offset += 4;
+
+    // --- write message ---
+    memcpy(b->buffer + b->offset, msg, msg_offset);
+    b->offset += msg_offset;
+
+    return 0;
 }
+
+int osc_bundle_send(OscBundle *b, int sock)
+{
+    int bytes = send(sock, b->buffer, b->offset, 0);
+    if (bytes < 0) {
+        perror("send");
+        return -1;
+    }
+    return bytes;
+}
+
+
+
+
+
+
+
+
 
 
 int main()
@@ -129,14 +186,24 @@ int main()
     int sock = create_socket();
     connect_socket(sock, "127.0.0.1", 9008);
 
+    char bundle_buffer[2048];
 
-    float test = 0.0f;
+    float t = 0.0f;
 
     while (1)
     {
-        send_osc(sock, "/fader1", "f", test);
-        test += 0.1f;
-        usleep(100000); //100ms
+        OscBundle bundle;
+        osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
+
+        osc_bundle_add(&bundle, "/fader1", "f", t);
+        osc_bundle_add(&bundle, "/fader2", "f", t * 0.2f);
+        osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
+
+
+        osc_bundle_send(&bundle, sock);
+
+        t += 0.05f;
+        usleep(16000); //100ms
     }
     close(sock);
     return 0;
