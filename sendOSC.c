@@ -90,7 +90,8 @@ void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
     b->offset = 0;
 
     // "#bundle" + padding (8 bytes total)
-    memcpy(b->buffer + b->offset, "#bundle", 7);
+    char bStr[7] = "#bundle";
+    memcpy(b->buffer + b->offset, bStr, strlen(bStr));
     b->offset += 8;
 
     //timetag (8bytes) immediate
