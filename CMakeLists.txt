@@ -3,6 +3,6 @@ project(C_osc C)
 
 set(CMAKE_C_STANDARD 23)
 
-add_executable(C_osc sendOSC.c
+add_executable(C_osc C_osc.c
 
 )

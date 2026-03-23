@@ -6,12 +6,170 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-
-
 int pad4(int n) //rounds up to next multiple of 4
 {
     return (n + 3) & ~0x03;
 }
+
+typedef struct
+{
+    char *buffer;
+    int capacity;
+    int offset;
+} OscBundle;
+
+void osc_bundle_init(OscBundle *b, char *buffer, int capacity);
+int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...);
+int osc_bundle_add_float32(OscBundle *b, const char *address, float value);
+int osc_bundle_add_int32(OscBundle *b, const char *address, int value);
+int osc_bundle_add_string(OscBundle *b, const char *address, const char *str);
+int osc_bundle_send(OscBundle *b, int sock);
+
+
+
+// ------------- OSC RECEIVING FUNCTIONS -------------
+
+int bind_socket(int port)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+    {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+    {
+        perror("Bind failed");
+        close(sock);
+        exit(1);
+    }
+
+    return sock;
+}
+
+int read_padded_string(const char *buf, int offset, char *out, int maxlen)
+{
+    int len = strlen(buf + offset);
+    int padded = pad4(len + 1);
+
+    if (out)
+    {
+        strncpy(out, buf + offset, maxlen - 1);
+        out[maxlen - 1] = '\0';
+    }
+
+    return offset + padded;
+}
+
+int32_t read_int32(const char *buf, int offset, int *next_offset)
+{
+    int32_t val;
+    memcpy(&val, buf + offset, 4);
+    val = ntohl(val);
+
+    *next_offset = offset + 4;
+    return val;
+}
+
+float read_float32(const char *buf, int offset, int *next_offset)
+{
+    uint32_t temp;
+    memcpy(&temp, buf + offset, 4);
+    temp = ntohl(temp);
+
+    float val;
+    memcpy(&val, &temp, 4);
+
+    *next_offset = offset + 4;
+    return val;
+}
+
+void parse_osc_message(const char *buf, int size)
+{
+    int offset = 0;
+
+    char address[256];
+    offset = read_padded_string(buf, offset, address, sizeof(address));
+
+    char types[256];
+    offset = read_padded_string(buf, offset, types, sizeof(types));
+
+    printf("OSC Message: %s %s\n", address, types);
+
+    for (int i = 1; types[i] != '\0'; i++) //skips comma
+    {
+        switch (types[i])
+        {
+            case 'i':
+            {
+                int next;
+                int32_t val = read_int32(buf, offset, &next);
+                offset = next;
+                printf("  int: %d\n", val);
+                break;
+            }
+
+            case 'f':
+            {
+                int next;
+                float val = read_float32(buf, offset, &next);
+                offset = next;
+                printf("  float: %f\n", val);
+                break;
+            }
+
+            case 's':
+            {
+                char str[256];
+                offset = read_padded_string(buf, offset, str, sizeof(str));
+                printf("  string: %s\n", str);
+                break;
+            }
+
+            default:
+                printf("  unsupported type: %c\n", types[i]);
+                return;
+        }
+    }
+}
+
+void parse_osc_packet(const char *buf, int size)
+{
+    if (strncmp(buf, "#bundle", 7) == 0)
+    {
+        int offset = 16; // "#bundle" (8 bytes padded) + timetag (8 bytes)
+
+        while (offset < size)
+        {
+            int32_t elem_size;
+            memcpy(&elem_size, buf + offset, 4);
+            elem_size = ntohl(elem_size);
+            offset += 4;
+
+            parse_osc_message(buf + offset, elem_size);
+
+            offset += elem_size;
+        }
+    }
+    else
+    {
+        parse_osc_message(buf, size);
+    }
+}
+
+
+
+
+// ------------- OSC SENDING FUNCTIONS ---------------
+
 
 int write_padded_string(char *buf, int offset, const char *str)
 {
@@ -69,20 +227,6 @@ void connect_socket(int sock, const char *ip, int port)
 }
 
 
-typedef struct
-{
-    char *buffer;
-    int capacity;
-    int offset;
-} OscBundle;
-
-void osc_bundle_init(OscBundle *b, char *buffer, int capacity);
-int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...);
-int osc_bundle_add_float32(OscBundle *b, const char *address, float value);
-int osc_bundle_add_int32(OscBundle *b, const char *address, int value);
-int osc_bundle_add_string(OscBundle *b, const char *address, const char *str);
-int osc_bundle_send(OscBundle *b, int sock);
-
 
 void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
 {
@@ -90,12 +234,8 @@ void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
     b->capacity = capacity;
     b->offset = 0;
 
-    // "#bundle" + padding (8 bytes total)
-    char bStr[7] = "#bundle";
-    memcpy(b->buffer + b->offset, bStr, strlen(bStr) - 1);
-    b->offset += strlen(bStr);
-
-
+    memcpy(b->buffer + b->offset, "#bundle", 8);
+    b->offset += 8;
 
     //timetag (8bytes) immediate
     memset(b->buffer + b->offset, 0, 8);
@@ -253,8 +393,11 @@ int osc_bundle_send(OscBundle *b, int sock)
 
 int main()
 {
-    int sock = create_socket();
-    connect_socket(sock, "127.0.0.1", 9008);
+    int recvSock = bind_socket(9009);
+    char recv_buf[2048];
+
+    int sendSock = create_socket();
+    connect_socket(sendSock, "127.0.0.1", 9008);
 
     char bundle_buffer[2048];
 
@@ -263,6 +406,16 @@ int main()
 
     while (1)
     {
+        int bytes = recv(recvSock, recv_buf, sizeof(recv_buf), 0);
+        if (bytes < 0)
+        {
+            perror("recv");
+            continue;
+        }
+        parse_osc_packet(recv_buf, bytes);
+
+
+
         OscBundle bundle;
         osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
 
@@ -275,12 +428,12 @@ int main()
         //osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
 
 
-        osc_bundle_send(&bundle, sock);
+        osc_bundle_send(&bundle, sendSock);
 
         t += 0.5f;
         i += 1;
         usleep(16000); //100ms
     }
-    close(sock);
+    close(sendSock);
     return 0;
 }
