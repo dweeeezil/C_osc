@@ -95,8 +95,10 @@ void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
 
     // "#bundle" + padding (8 bytes total)
     char bStr[7] = "#bundle";
-    memcpy(b->buffer + b->offset, "#bundle", 7);
-    b->offset += 8;
+    memcpy(b->buffer + b->offset, bStr, strlen(bStr) - 1);
+    b->offset += strlen(bStr);
+
+
 
     //timetag (8bytes) immediate
     memset(b->buffer + b->offset, 0, 8);
@@ -167,12 +169,12 @@ int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...)
     return 0;
 }
 
-int osc_bundle_add_float32(OscBundle *b, const char *address, float value)
+int OLD_osc_bundle_add_float32(OscBundle *b, const char *address, float value)
 {
-    char msg[256] = {0};
-    int offset = 0;
+    char msg[256] = {0}; //allocates clean memory to write to
+    int offset = 0; //sets beginning
 
-    offset = write_padded_string(msg, offset, address);
+    offset = write_padded_string(msg, offset, address); //writes address to chunk, moves offset to beginning
     offset = write_padded_string(msg, offset, ",f");
     offset = write_float32(msg, offset, value);
 
@@ -182,17 +184,16 @@ int osc_bundle_add_float32(OscBundle *b, const char *address, float value)
         return -1;
     }
 
-    int32_t be_size = htonl(offset);
+    int32_t be_size = htonl(offset);  //calcs size of everything written in msg
     memcpy(b->buffer + b->offset, &be_size, 4);
     b->offset += 4;
 
-    memcpy(b->buffer + b->offset, msg, offset);
+    memcpy(b->buffer + b->offset, msg, offset); //copy to buffer
     b->offset += offset;
 
     return 0;
 }
-
-int osc_bundle_add_int32(OscBundle *b, const char *address, int value)
+int OLD_osc_bundle_add_int32(OscBundle *b, const char *address, int value)
 {
     char msg[256] = {0};
     int offset = 0;
@@ -216,8 +217,7 @@ int osc_bundle_add_int32(OscBundle *b, const char *address, int value)
 
     return 0;
 }
-
-int osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
+int OLD_osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
 {
     char msg[256] = {0};
     int offset = 0;
@@ -242,6 +242,77 @@ int osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
     return 0;
 }
 
+int osc_bundle_add_float32(OscBundle *b, const char *address, float value) //New and improved
+{
+    int _offset = b->offset + 4; //sets beginning NEW - Writes directly to buffer at latest offset
+
+
+    _offset = write_padded_string(b->buffer, _offset, address);
+    _offset = write_padded_string(b->buffer, _offset, ",f");
+    _offset = write_float32(b->buffer, _offset, value);
+
+    int32_t be_size = htonl(_offset - (b->offset + 4));  //calcs size of everything written in msg
+
+    if (_offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    } //Error Checking
+
+    memcpy(b->buffer + b->offset, &be_size, 4);
+
+    b->offset = _offset;
+
+    return 0;
+}
+
+int osc_bundle_add_int32(OscBundle *b, const char *address, int value)
+{
+    int _offset = b->offset + 4;
+
+    _offset = write_padded_string(b->buffer, _offset, address);
+    _offset = write_padded_string(b->buffer, _offset, ",i");
+    _offset = write_int32(b->buffer, _offset, value);
+
+    int32_t be_size = htonl(_offset - (b->offset + 4));
+
+    if (_offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    } //Error Checking
+
+    memcpy(b->buffer + b->offset, &be_size, 4);
+
+    b->offset = _offset;
+
+    return 0;
+}
+
+int osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
+{
+    int _offset = b->offset + 4;
+
+    _offset = write_padded_string(b->buffer, _offset, address);
+    _offset = write_padded_string(b->buffer, _offset, ",s");
+    _offset = write_padded_string(b->buffer, _offset, str);
+
+    int32_t be_size = htonl(_offset - (b->offset + 4));
+
+    if (_offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    } //Error Checking
+
+    memcpy(b->buffer + b->offset, &be_size, 4);
+
+    b->offset = _offset;
+
+    return 0;
+}
+
+
 int osc_bundle_send(OscBundle *b, int sock)
 {
     int bytes = send(sock, b->buffer, b->offset, 0);
@@ -251,9 +322,6 @@ int osc_bundle_send(OscBundle *b, int sock)
     }
     return bytes;
 }
-
-
-
 
 
 
@@ -276,18 +344,18 @@ int main()
         OscBundle bundle;
         osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
 
-        osc_bundle_add_float32(&bundle, "/test/float", t);
-        osc_bundle_add_int32(&bundle, "/test/int", i);
-        osc_bundle_add_string(&bundle, "/test/string", "hello world");
+        //osc_bundle_add_float32(&bundle, "/test/float", t);
+        //osc_bundle_add_int32(&bundle, "/test/int", i);
+        //osc_bundle_add_string(&bundle, "/test/string", "hello world");
 
-        osc_bundle_add(&bundle, "/fader1", "f", t);
-        osc_bundle_add(&bundle, "/fader2", "f", t * 0.2f);
-        osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
+        //osc_bundle_add(&bundle, "/fader1", "f", t);
+        //osc_bundle_add(&bundle, "/fader2", "f", t * 0.2f);
+        //osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
 
 
         osc_bundle_send(&bundle, sock);
 
-        t += 0.05f;
+        t += 0.5f;
         i += 1;
         usleep(16000); //100ms
     }
