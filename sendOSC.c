@@ -95,8 +95,8 @@ void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
 
     // "#bundle" + padding (8 bytes total)
     char bStr[7] = "#bundle";
-    memcpy(b->buffer + b->offset, bStr, strlen(bStr));
-    b->offset += (strlen(bStr) + 1);
+    memcpy(b->buffer + b->offset, "#bundle", 7);
+    b->offset += 8;
 
     //timetag (8bytes) immediate
     memset(b->buffer + b->offset, 0, 8);
@@ -269,22 +269,26 @@ int main()
     char bundle_buffer[2048];
 
     float t = 0.0f;
+    int i = 0;
 
     while (1)
     {
         OscBundle bundle;
         osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
 
-        osc_bundle_add(&bundle, "/osc", "f", t);
-        //osc_bundle_add_float32(&bundle, "/fader1", t);
-       // osc_bundle_add_float32(&bundle, "/fader2", t * 0.2f);
-        //osc_bundle_add_int32(&bundle, "/index", 3);
-        //osc_bundle_add_string(&bundle, "/label", "hello");
+        osc_bundle_add_float32(&bundle, "/test/float", t);
+        osc_bundle_add_int32(&bundle, "/test/int", i);
+        osc_bundle_add_string(&bundle, "/test/string", "hello world");
+
+        osc_bundle_add(&bundle, "/fader1", "f", t);
+        osc_bundle_add(&bundle, "/fader2", "f", t * 0.2f);
+        osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
 
 
         osc_bundle_send(&bundle, sock);
 
         t += 0.05f;
+        i += 1;
         usleep(16000); //100ms
     }
     close(sock);
