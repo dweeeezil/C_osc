@@ -81,7 +81,11 @@ typedef struct
 
 void osc_bundle_init(OscBundle *b, char *buffer, int capacity);
 int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...);
+int osc_bundle_add_float32(OscBundle *b, const char *address, float value);
+int osc_bundle_add_int32(OscBundle *b, const char *address, int value);
+int osc_bundle_add_string(OscBundle *b, const char *address, const char *str);
 int osc_bundle_send(OscBundle *b, int sock);
+
 
 void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
 {
@@ -92,7 +96,7 @@ void osc_bundle_init(OscBundle *b, char *buffer, int capacity)
     // "#bundle" + padding (8 bytes total)
     char bStr[7] = "#bundle";
     memcpy(b->buffer + b->offset, bStr, strlen(bStr));
-    b->offset += 8;
+    b->offset += (strlen(bStr) + 1);
 
     //timetag (8bytes) immediate
     memset(b->buffer + b->offset, 0, 8);
@@ -163,6 +167,81 @@ int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...)
     return 0;
 }
 
+int osc_bundle_add_float32(OscBundle *b, const char *address, float value)
+{
+    char msg[256] = {0};
+    int offset = 0;
+
+    offset = write_padded_string(msg, offset, address);
+    offset = write_padded_string(msg, offset, ",f");
+    offset = write_float32(msg, offset, value);
+
+    if (b->offset + 4 + offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    }
+
+    int32_t be_size = htonl(offset);
+    memcpy(b->buffer + b->offset, &be_size, 4);
+    b->offset += 4;
+
+    memcpy(b->buffer + b->offset, msg, offset);
+    b->offset += offset;
+
+    return 0;
+}
+
+int osc_bundle_add_int32(OscBundle *b, const char *address, int value)
+{
+    char msg[256] = {0};
+    int offset = 0;
+
+    offset = write_padded_string(msg, offset, address);
+    offset = write_padded_string(msg, offset, ",i");
+    offset = write_int32(msg, offset, value);
+
+    if (b->offset + 4 + offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    }
+
+    int32_t be_size = htonl(offset);
+    memcpy(b->buffer + b->offset, &be_size, 4);
+    b->offset += 4;
+
+    memcpy(b->buffer + b->offset, msg, offset);
+    b->offset += offset;
+
+    return 0;
+}
+
+int osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
+{
+    char msg[256] = {0};
+    int offset = 0;
+
+    offset = write_padded_string(msg, offset, address);
+    offset = write_padded_string(msg, offset, ",s");
+    offset = write_padded_string(msg, offset, str);
+
+    if (b->offset + 4 + offset > b->capacity)
+    {
+        fprintf(stderr, "OSC bundle overflow\n");
+        return -1;
+    }
+
+    int32_t be_size = htonl(offset);
+    memcpy(b->buffer + b->offset, &be_size, 4);
+    b->offset += 4;
+
+    memcpy(b->buffer + b->offset, msg, offset);
+    b->offset += offset;
+
+    return 0;
+}
+
 int osc_bundle_send(OscBundle *b, int sock)
 {
     int bytes = send(sock, b->buffer, b->offset, 0);
@@ -196,9 +275,11 @@ int main()
         OscBundle bundle;
         osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
 
-        osc_bundle_add(&bundle, "/fader1", "f", t);
-        osc_bundle_add(&bundle, "/fader2", "f", t * 0.2f);
-        osc_bundle_add(&bundle, "/xy", "ff", t, 1.0f - t);
+        osc_bundle_add(&bundle, "/osc", "f", t);
+        //osc_bundle_add_float32(&bundle, "/fader1", t);
+       // osc_bundle_add_float32(&bundle, "/fader2", t * 0.2f);
+        //osc_bundle_add_int32(&bundle, "/index", 3);
+        //osc_bundle_add_string(&bundle, "/label", "hello");
 
 
         osc_bundle_send(&bundle, sock);
