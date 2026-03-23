@@ -23,7 +23,6 @@ int write_padded_string(char *buf, int offset, const char *str)
     return offset + padded;
 }
 
-
 // write int32 (big endian)
 int write_int32(char *buf, int offset, int32_t val)
 {
@@ -68,8 +67,6 @@ void connect_socket(int sock, const char *ip, int port)
         exit(1);
     }
 }
-
-
 
 
 typedef struct
@@ -169,7 +166,6 @@ int osc_bundle_add(OscBundle *b, const char *address, const char *types, ...)
     return 0;
 }
 
-
 int osc_bundle_add_float32(OscBundle *b, const char *address, float value) //New and improved
 {
     int _offset = b->offset + 4; //sets beginning NEW - Writes directly to buffer at latest offset
@@ -240,7 +236,6 @@ int osc_bundle_add_string(OscBundle *b, const char *address, const char *str)
     return 0;
 }
 
-
 int osc_bundle_send(OscBundle *b, int sock)
 {
     int bytes = send(sock, b->buffer, b->offset, 0);
@@ -250,7 +245,6 @@ int osc_bundle_send(OscBundle *b, int sock)
     }
     return bytes;
 }
-
 
 
 
