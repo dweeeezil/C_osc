@@ -406,7 +406,7 @@ int main()
 
     while (1)
     {
-        /*
+
         int bytes = recv(recvSock, recv_buf, sizeof(recv_buf), 0);
         if (bytes < 0)
         {
@@ -417,7 +417,7 @@ int main()
         {
             parse_osc_packet(recv_buf, bytes);
         }
-*/
+
 
         OscBundle bundle;
         osc_bundle_init(&bundle, bundle_buffer, sizeof(bundle_buffer));
